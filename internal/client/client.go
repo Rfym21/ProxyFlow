@@ -51,6 +51,7 @@ type Client struct {
 	timeout             time.Duration           // 请求超时时间
 	maxIdleConns        int                     // 总的最大空闲连接数
 	maxIdleConnsPerHost int                     // 每个主机的最大空闲连接数
+	maxRetryCount       int                     // 单个请求的最大代理重试次数
 }
 
 // NewClient 创建新的HTTP客户端管理器实例。
@@ -60,22 +61,24 @@ type Client struct {
 //   - timeout: HTTP请求超时时间
 //   - maxIdleConns: 总的最大空闲连接数
 //   - maxIdleConnsPerHost: 每个主机的最大空闲连接数
+//   - maxRetryCount: 单个请求的最大代理重试次数
 //
 // 返回值：
 //   - *Client: 初始化完成的客户端管理器实例
-func NewClient(proxyPool *pool.Pool, timeout time.Duration, maxIdleConns, maxIdleConnsPerHost int) *Client {
+func NewClient(proxyPool *pool.Pool, timeout time.Duration, maxIdleConns, maxIdleConnsPerHost, maxRetryCount int) *Client {
 	return &Client{
 		pool:                proxyPool,
 		clients:             make(map[string]*http.Client),
 		timeout:             timeout,
 		maxIdleConns:        maxIdleConns,
 		maxIdleConnsPerHost: maxIdleConnsPerHost,
+		maxRetryCount:       maxRetryCount,
 	}
 }
 
 // Do 通过代理服务器执行HTTP请求。
 //
-// 尝试使用代理池中的所有代理服务器执行请求，直到成功或全部失败。
+// 尝试使用代理池中的代理服务器执行请求，最多重试maxRetryCount次。
 // 使用轮询机制选择代理，确保负载均衡。
 //
 // 参数：
@@ -90,9 +93,15 @@ func (c *Client) Do(req *http.Request) (*http.Response, models.ProxyInfo, error)
 		return nil, models.ProxyInfo{}, fmt.Errorf("没有可用的代理")
 	}
 
-	// 尝试所有代理
+	// 计算实际重试次数：取maxRetryCount和代理池大小的较小值
+	maxRetries := c.maxRetryCount
+	if c.pool.Size() < maxRetries {
+		maxRetries = c.pool.Size()
+	}
+
+	// 尝试指定次数的代理
 	var lastErr error
-	for i := 0; i < c.pool.Size(); i++ {
+	for i := 0; i < maxRetries; i++ {
 		proxy := c.pool.NextProxy()
 		if proxy.Host == "" {
 			continue
@@ -109,7 +118,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, models.ProxyInfo, error)
 		lastErr = err
 	}
 
-	return nil, models.ProxyInfo{}, fmt.Errorf("所有代理都失败了，最后错误: %v", lastErr)
+	return nil, models.ProxyInfo{}, fmt.Errorf("尝试了 %d 个代理后失败，最后错误: %v", maxRetries, lastErr)
 }
 
 // getClient 获取或创建指定代理的HTTP客户端。

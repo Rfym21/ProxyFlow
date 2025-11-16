@@ -20,6 +20,7 @@ type Config struct {
 	ProxyFile            string        // 代理文件路径
 	MaxIdleConns         int           // 总的最大空闲连接数
 	MaxIdleConnsPerHost  int           // 每个主机的最大空闲连接数
+	MaxRetryCount        int           // 单个请求的最大代理重试次数
 	RequestTimeout       time.Duration // 请求超时时间
 	AuthUsername         string        // 代理服务器认证用户名
 	AuthPassword         string        // 代理服务器认证密码
@@ -38,6 +39,7 @@ func Load() *Config {
 		ProxyFile:            getEnv("PROXY_FILE", "proxy.txt"),
 		MaxIdleConns:         getEnvInt("MAX_IDLE_CONNS", 1000),
 		MaxIdleConnsPerHost:  getEnvInt("MAX_IDLE_CONNS_PER_HOST", 100),
+		MaxRetryCount:        getEnvInt("MAX_RETRY_COUNT", 3),
 		RequestTimeout:       time.Duration(getEnvInt("REQUEST_TIMEOUT", 30)) * time.Second,
 		AuthUsername:         getEnv("AUTH_USERNAME", ""),
 		AuthPassword:         getEnv("AUTH_PASSWORD", ""),

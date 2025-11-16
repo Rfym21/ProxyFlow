@@ -15,6 +15,7 @@ services:
       - PROXY_FILE=proxy.txt
       - MAX_IDLE_CONNS=1000
       - MAX_IDLE_CONNS_PER_HOST=100
+      - MAX_RETRY_COUNT=3
       - REQUEST_TIMEOUT=30
       # 认证配置（可选，留空则无认证）
       - AUTH_USERNAME=
