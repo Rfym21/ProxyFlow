@@ -16,12 +16,13 @@ import (
 // 包含了代理服务器运行所需的所有配置参数，包括网络设置、
 // 资源配置和认证参数等。
 type Config struct {
-	ProxyPort      string        // 代理服务监听端口
-	ProxyFile      string        // 代理文件路径
-	PoolSize       int           // 连接池大小
-	RequestTimeout time.Duration // 请求超时时间
-	AuthUsername   string        // 代理服务器认证用户名
-	AuthPassword   string        // 代理服务器认证密码
+	ProxyPort            string        // 代理服务监听端口
+	ProxyFile            string        // 代理文件路径
+	MaxIdleConns         int           // 总的最大空闲连接数
+	MaxIdleConnsPerHost  int           // 每个主机的最大空闲连接数
+	RequestTimeout       time.Duration // 请求超时时间
+	AuthUsername         string        // 代理服务器认证用户名
+	AuthPassword         string        // 代理服务器认证密码
 }
 
 // Load 从环境变量加载应用配置。
@@ -33,12 +34,13 @@ type Config struct {
 //   - *Config: 配置实例指针
 func Load() *Config {
 	return &Config{
-		ProxyPort:      getEnv("PROXY_PORT", "8282"),
-		ProxyFile:      getEnv("PROXY_FILE", "proxy.txt"),
-		PoolSize:       getEnvInt("POOL_SIZE", 100),
-		RequestTimeout: time.Duration(getEnvInt("REQUEST_TIMEOUT", 30)) * time.Second,
-		AuthUsername:   getEnv("AUTH_USERNAME", ""),
-		AuthPassword:   getEnv("AUTH_PASSWORD", ""),
+		ProxyPort:            getEnv("PROXY_PORT", "8282"),
+		ProxyFile:            getEnv("PROXY_FILE", "proxy.txt"),
+		MaxIdleConns:         getEnvInt("MAX_IDLE_CONNS", 1000),
+		MaxIdleConnsPerHost:  getEnvInt("MAX_IDLE_CONNS_PER_HOST", 100),
+		RequestTimeout:       time.Duration(getEnvInt("REQUEST_TIMEOUT", 30)) * time.Second,
+		AuthUsername:         getEnv("AUTH_USERNAME", ""),
+		AuthPassword:         getEnv("AUTH_PASSWORD", ""),
 	}
 }
 

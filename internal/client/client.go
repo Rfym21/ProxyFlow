@@ -45,10 +45,12 @@ func (t *proxyAuthTransport) RoundTrip(req *http.Request) (*http.Response, error
 // 负载均衡和认证管理等功能。每个代理对应一个独立的
 // HTTP客户端实例，含有专门的连接池配置。
 type Client struct {
-	pool       *pool.Pool              // 代理池
-	clients    map[string]*http.Client // 每个代理的HTTP客户端
-	clientsMux sync.RWMutex            // 客户端映射锁
-	timeout    time.Duration           // 请求超时时间
+	pool                *pool.Pool              // 代理池
+	clients             map[string]*http.Client // 每个代理的HTTP客户端
+	clientsMux          sync.RWMutex            // 客户端映射锁
+	timeout             time.Duration           // 请求超时时间
+	maxIdleConns        int                     // 总的最大空闲连接数
+	maxIdleConnsPerHost int                     // 每个主机的最大空闲连接数
 }
 
 // NewClient 创建新的HTTP客户端管理器实例。
@@ -56,14 +58,18 @@ type Client struct {
 // 参数：
 //   - proxyPool: 代理池实例，用于提供可用的代理服务器
 //   - timeout: HTTP请求超时时间
+//   - maxIdleConns: 总的最大空闲连接数
+//   - maxIdleConnsPerHost: 每个主机的最大空闲连接数
 //
 // 返回值：
 //   - *Client: 初始化完成的客户端管理器实例
-func NewClient(proxyPool *pool.Pool, timeout time.Duration) *Client {
+func NewClient(proxyPool *pool.Pool, timeout time.Duration, maxIdleConns, maxIdleConnsPerHost int) *Client {
 	return &Client{
-		pool:    proxyPool,
-		clients: make(map[string]*http.Client),
-		timeout: timeout,
+		pool:                proxyPool,
+		clients:             make(map[string]*http.Client),
+		timeout:             timeout,
+		maxIdleConns:        maxIdleConns,
+		maxIdleConnsPerHost: maxIdleConnsPerHost,
 	}
 }
 
@@ -168,8 +174,8 @@ func (c *Client) createClient(proxy models.ProxyInfo) *http.Client {
 	// 创建传输层配置
 	transport := &http.Transport{
 		Proxy:               http.ProxyURL(proxyURL),
-		MaxIdleConns:        1000,
-		MaxIdleConnsPerHost: 100,
+		MaxIdleConns:        c.maxIdleConns,
+		MaxIdleConnsPerHost: c.maxIdleConnsPerHost,
 		IdleConnTimeout:     90 * time.Second,
 		DisableKeepAlives:   false,
 	}

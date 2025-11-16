@@ -47,15 +47,17 @@ type Server struct {
 // 参数：
 //   - proxyPool: 代理池实例，用于管理上游代理
 //   - timeout: HTTP请求超时时间
+//   - maxIdleConns: 总的最大空闲连接数
+//   - maxIdleConnsPerHost: 每个主机的最大空闲连接数
 //   - authUsername: 代理服务器认证用户名，为空则不需要认证
 //   - authPassword: 代理服务器认证密码
 //
 // 返回值：
 //   - *Server: 配置完成的代理服务器实例
-func NewServer(proxyPool *pool.Pool, timeout time.Duration, authUsername, authPassword string) *Server {
+func NewServer(proxyPool *pool.Pool, timeout time.Duration, maxIdleConns, maxIdleConnsPerHost int, authUsername, authPassword string) *Server {
 	return &Server{
 		pool:         proxyPool,
-		client:       client.NewClient(proxyPool, timeout),
+		client:       client.NewClient(proxyPool, timeout, maxIdleConns, maxIdleConnsPerHost),
 		timeout:      timeout,
 		authUsername: authUsername,
 		authPassword: authPassword,

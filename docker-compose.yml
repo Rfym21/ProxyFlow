@@ -13,7 +13,8 @@ services:
       # 代理服务器配置
       - PROXY_PORT=8282
       - PROXY_FILE=proxy.txt
-      - POOL_SIZE=100
+      - MAX_IDLE_CONNS=1000
+      - MAX_IDLE_CONNS_PER_HOST=100
       - REQUEST_TIMEOUT=30
       # 认证配置（可选，留空则无认证）
       - AUTH_USERNAME=

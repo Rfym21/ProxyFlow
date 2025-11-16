@@ -21,8 +21,8 @@ func main() {
 
 	// 加载配置
 	cfg := config.Load()
-	log.Printf("启动 ProxyFlow，配置信息: 端口=%s, 代理文件=%s, 连接池大小=%d",
-		cfg.ProxyPort, cfg.ProxyFile, cfg.PoolSize)
+	log.Printf("启动 ProxyFlow，配置信息: 端口=%s, 代理文件=%s, MaxIdleConns=%d, MaxIdleConnsPerHost=%d",
+		cfg.ProxyPort, cfg.ProxyFile, cfg.MaxIdleConns, cfg.MaxIdleConnsPerHost)
 
 	// 创建代理池
 	proxyPool, err := pool.NewPool(cfg.ProxyFile)
@@ -31,7 +31,7 @@ func main() {
 	}
 
 	// 创建代理服务器
-	proxyServer := server.NewServer(proxyPool, cfg.RequestTimeout, cfg.AuthUsername, cfg.AuthPassword)
+	proxyServer := server.NewServer(proxyPool, cfg.RequestTimeout, cfg.MaxIdleConns, cfg.MaxIdleConnsPerHost, cfg.AuthUsername, cfg.AuthPassword)
 
 	// 设置优雅关闭
 	setupGracefulShutdown(proxyServer)

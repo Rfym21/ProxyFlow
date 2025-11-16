@@ -51,8 +51,11 @@ PROXY_PORT=8282
 # 代理文件路径
 PROXY_FILE=proxy.txt
 
-# 连接池大小（每个代理的最大连接数）
-POOL_SIZE=100
+# 总的最大空闲连接数
+MAX_IDLE_CONNS=1000
+
+# 每个主机的最大空闲连接数
+MAX_IDLE_CONNS_PER_HOST=100
 
 # 请求超时时间（秒）
 REQUEST_TIMEOUT=30
@@ -86,9 +89,10 @@ go build -o proxyflow ./cmd/proxyflow
 
 | 配置项 | 说明 | 默认值 | 示例 |
 |--------|------|--------|------|
-| `PROXY_PORT` | 代理服务监听端口 | `8080` | `8282` |
+| `PROXY_PORT` | 代理服务监听端口 | `8282` | `8080` |
 | `PROXY_FILE` | 代理列表文件路径 | `proxy.txt` | `proxies.txt` |
-| `POOL_SIZE` | 连接池大小 | `100` | `200` |
+| `MAX_IDLE_CONNS` | 总的最大空闲连接数 | `1000` | `2000` |
+| `MAX_IDLE_CONNS_PER_HOST` | 每个主机的最大空闲连接数 | `100` | `200` |
 | `REQUEST_TIMEOUT` | 请求超时时间(秒) | `30` | `60` |
 | `AUTH_USERNAME` | 认证用户名 | 空(无认证) | `admin` |
 | `AUTH_PASSWORD` | 认证密码 | 空(无认证) | `123456` |
@@ -127,7 +131,8 @@ services:
     environment:
       - PROXY_PORT=8282
       - PROXY_FILE=proxy.txt
-      - POOL_SIZE=100
+      - MAX_IDLE_CONNS=1000
+      - MAX_IDLE_CONNS_PER_HOST=100
       - REQUEST_TIMEOUT=30
       # 认证配置（可选）
       - AUTH_USERNAME=
@@ -160,7 +165,8 @@ docker run -d \
   -v $(pwd)/proxy.txt:/app/proxy.txt \
   -e PROXY_PORT=8282 \
   -e PROXY_FILE=/app/proxy.txt \
-  -e POOL_SIZE=100 \
+  -e MAX_IDLE_CONNS=1000 \
+  -e MAX_IDLE_CONNS_PER_HOST=100 \
   -e REQUEST_TIMEOUT=30 \
   -e AUTH_USERNAME= \
   -e AUTH_PASSWORD= \

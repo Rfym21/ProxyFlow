@@ -51,8 +51,11 @@ PROXY_PORT=8282
 # Proxy file path
 PROXY_FILE=proxy.txt
 
-# Connection pool size (max connections per proxy)
-POOL_SIZE=100
+# Maximum total idle connections
+MAX_IDLE_CONNS=1000
+
+# Maximum idle connections per host
+MAX_IDLE_CONNS_PER_HOST=100
 
 # Request timeout in seconds
 REQUEST_TIMEOUT=30
@@ -86,9 +89,10 @@ Configure your HTTP client proxy to:
 
 | Config Item | Description | Default | Example |
 |--------|------|--------|------|
-| `PROXY_PORT` | Proxy service listening port | `8080` | `8282` |
+| `PROXY_PORT` | Proxy service listening port | `8282` | `8080` |
 | `PROXY_FILE` | Proxy list file path | `proxy.txt` | `proxies.txt` |
-| `POOL_SIZE` | Connection pool size | `100` | `200` |
+| `MAX_IDLE_CONNS` | Maximum total idle connections | `1000` | `2000` |
+| `MAX_IDLE_CONNS_PER_HOST` | Maximum idle connections per host | `100` | `200` |
 | `REQUEST_TIMEOUT` | Request timeout in seconds | `30` | `60` |
 | `AUTH_USERNAME` | Authentication username | Empty (no auth) | `admin` |
 | `AUTH_PASSWORD` | Authentication password | Empty (no auth) | `123456` |
@@ -127,7 +131,8 @@ services:
     environment:
       - PROXY_PORT=8282
       - PROXY_FILE=proxy.txt
-      - POOL_SIZE=100
+      - MAX_IDLE_CONNS=1000
+      - MAX_IDLE_CONNS_PER_HOST=100
       - REQUEST_TIMEOUT=30
       # Authentication config (optional)
       - AUTH_USERNAME=
@@ -160,7 +165,8 @@ docker run -d \
   -v $(pwd)/proxy.txt:/app/proxy.txt \
   -e PROXY_PORT=8282 \
   -e PROXY_FILE=/app/proxy.txt \
-  -e POOL_SIZE=100 \
+  -e MAX_IDLE_CONNS=1000 \
+  -e MAX_IDLE_CONNS_PER_HOST=100 \
   -e REQUEST_TIMEOUT=30 \
   -e AUTH_USERNAME= \
   -e AUTH_PASSWORD= \
