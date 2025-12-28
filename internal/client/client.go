@@ -6,11 +6,15 @@
 package client
 
 import (
+	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"sync"
 	"time"
+
+	"golang.org/x/net/proxy"
 
 	"github.com/rfym21/ProxyFlow/internal/auth"
 	"github.com/rfym21/ProxyFlow/internal/models"
@@ -161,23 +165,37 @@ func (c *Client) getClient(proxy models.ProxyInfo) *http.Client {
 // createClient 创建新的HTTP客户端实例。
 //
 // 根据代理信息配置客户端，设置代理URL、认证信息、
-// 连接池参数和超时配置。支持HTTP和HTTPS代理。
+// 连接池参数和超时配置。支持HTTP、HTTPS和SOCKS5代理。
 //
 // 参数：
-//   - proxy: 代理服务器信息
+//   - proxyInfo: 代理服务器信息
 //
 // 返回值：
 //   - *http.Client: 配置完成的HTTP客户端实例
-func (c *Client) createClient(proxy models.ProxyInfo) *http.Client {
+func (c *Client) createClient(proxyInfo models.ProxyInfo) *http.Client {
+	if proxyInfo.IsSOCKS5() {
+		return c.createSOCKS5Client(proxyInfo)
+	}
+	return c.createHTTPClient(proxyInfo)
+}
+
+// createHTTPClient 创建 HTTP/HTTPS 代理客户端。
+//
+// 参数：
+//   - proxyInfo: 代理服务器信息
+//
+// 返回值：
+//   - *http.Client: 配置完成的HTTP客户端实例
+func (c *Client) createHTTPClient(proxyInfo models.ProxyInfo) *http.Client {
 	// 创建代理URL
 	proxyURL := &url.URL{
-		Scheme: proxy.URL.Scheme,
-		Host:   proxy.Host,
+		Scheme: proxyInfo.URL.Scheme,
+		Host:   proxyInfo.Host,
 	}
 
 	// 添加认证信息
-	if proxy.Username != "" {
-		proxyURL.User = url.UserPassword(proxy.Username, proxy.Password)
+	if proxyInfo.Username != "" {
+		proxyURL.User = url.UserPassword(proxyInfo.Username, proxyInfo.Password)
 	}
 
 	// 创建传输层配置
@@ -191,15 +209,88 @@ func (c *Client) createClient(proxy models.ProxyInfo) *http.Client {
 
 	// 如果需要认证，包一层添加Proxy-Authorization
 	var rt http.RoundTripper = transport
-	if proxy.Username != "" {
-		authValue := auth.EncodeBasicAuth(proxy.Username, proxy.Password)
+	if proxyInfo.Username != "" {
+		authValue := auth.EncodeBasicAuth(proxyInfo.Username, proxyInfo.Password)
 		rt = &proxyAuthTransport{base: transport, proxyAuth: authValue}
 	}
 
-	// 创建HTTP客户端
 	return &http.Client{
 		Transport: rt,
 		Timeout:   c.timeout,
+	}
+}
+
+// createSOCKS5Client 创建 SOCKS5 代理客户端。
+//
+// 参数：
+//   - proxyInfo: 代理服务器信息
+//
+// 返回值：
+//   - *http.Client: 配置完成的HTTP客户端实例
+func (c *Client) createSOCKS5Client(proxyInfo models.ProxyInfo) *http.Client {
+	// 配置 SOCKS5 认证
+	var socks5Auth *proxy.Auth
+	if proxyInfo.Username != "" {
+		socks5Auth = &proxy.Auth{
+			User:     proxyInfo.Username,
+			Password: proxyInfo.Password,
+		}
+	}
+
+	// 创建 SOCKS5 dialer
+	dialer, err := proxy.SOCKS5("tcp", proxyInfo.Host, socks5Auth, proxy.Direct)
+	if err != nil {
+		// 如果创建失败，返回一个不可用的客户端
+		return &http.Client{Timeout: c.timeout}
+	}
+
+	// 创建传输层配置
+	transport := &http.Transport{
+		DialContext:         c.dialContextFromDialer(dialer),
+		MaxIdleConns:        c.maxIdleConns,
+		MaxIdleConnsPerHost: c.maxIdleConnsPerHost,
+		IdleConnTimeout:     90 * time.Second,
+		DisableKeepAlives:   false,
+	}
+
+	return &http.Client{
+		Transport: transport,
+		Timeout:   c.timeout,
+	}
+}
+
+// dialContextFromDialer 将 proxy.Dialer 转换为 DialContext 函数。
+//
+// 参数：
+//   - d: proxy.Dialer 实例
+//
+// 返回值：
+//   - func: DialContext 函数
+func (c *Client) dialContextFromDialer(d proxy.Dialer) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	// 如果 dialer 支持 ContextDialer，直接使用
+	if cd, ok := d.(proxy.ContextDialer); ok {
+		return cd.DialContext
+	}
+
+	// 否则包装一层支持 context
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		type dialResult struct {
+			conn net.Conn
+			err  error
+		}
+		done := make(chan dialResult, 1)
+
+		go func() {
+			conn, err := d.Dial(network, addr)
+			done <- dialResult{conn: conn, err: err}
+		}()
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case result := <-done:
+			return result.conn, result.err
+		}
 	}
 }
 
@@ -214,6 +305,10 @@ func (c *Client) Close() {
 	for _, client := range c.clients {
 		if transport, ok := client.Transport.(*http.Transport); ok {
 			transport.CloseIdleConnections()
+		} else if pat, ok := client.Transport.(*proxyAuthTransport); ok {
+			if baseTransport, ok := pat.base.(*http.Transport); ok {
+				baseTransport.CloseIdleConnections()
+			}
 		}
 	}
 

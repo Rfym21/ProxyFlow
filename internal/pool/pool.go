@@ -99,7 +99,7 @@ func (p *Pool) loadProxies(filename string) error {
 // parseProxy 解析代理字符串。
 //
 // 将代理URL字符串解析为ProxyInfo结构，提取协议、
-// 主机地址和认证信息。仅支持HTTP和HTTPS协议。
+// 主机地址和认证信息。支持 HTTP、HTTPS 和 SOCKS5 协议。
 //
 // 参数：
 //   - proxyStr: 代理URL字符串，格式为scheme://[user:pass@]host:port
@@ -113,13 +113,21 @@ func (p *Pool) parseProxy(proxyStr string) (*models.ProxyInfo, error) {
 		return nil, fmt.Errorf("无效的代理URL: %v", err)
 	}
 
-	if proxyURL.Scheme != "http" && proxyURL.Scheme != "https" {
-		return nil, fmt.Errorf("不支持的代理协议: %s", proxyURL.Scheme)
+	// 确定代理类型
+	var proxyType models.ProxyType
+	switch proxyURL.Scheme {
+	case "http", "https":
+		proxyType = models.ProxyTypeHTTP
+	case "socks5":
+		proxyType = models.ProxyTypeSOCKS5
+	default:
+		return nil, fmt.Errorf("不支持的代理协议: %s (支持: http, https, socks5)", proxyURL.Scheme)
 	}
 
 	proxyInfo := &models.ProxyInfo{
 		URL:  proxyURL,
 		Host: proxyURL.Host,
+		Type: proxyType,
 	}
 
 	// 提取认证信息

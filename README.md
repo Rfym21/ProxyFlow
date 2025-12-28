@@ -12,8 +12,9 @@
 
 ## 🚀 功能特性
 
-- ✅ **双协议支持** - HTTP/HTTPS代理完整支持
-- ✅ **上游代理认证** - 支持Basic Auth认证的上游代理
+- ✅ **多协议支持** - HTTP/HTTPS/SOCKS5 代理完整支持
+- ✅ **双入口服务** - 同时提供 HTTP 和 SOCKS5 代理入口
+- ✅ **上游代理认证** - 支持 Basic Auth 认证的上游代理
 - ✅ **智能负载均衡** - 轮询算法自动分配请求
 - ✅ **连接池管理** - 高效的连接复用机制
 
@@ -32,12 +33,18 @@ cd ProxyFlow
 
 ```txt
 # 代理列表文件
-# 格式: http://username:password@ip:port
+# 支持格式:
+#   HTTP/HTTPS: http://username:password@ip:port
+#   SOCKS5:     socks5://username:password@ip:port
 # 空行和以#开头的行将被忽略
 
+# HTTP 代理
 http://user1:pass1@192.168.1.100:8080
 http://user2:pass2@192.168.1.101:8080
-http://user3:pass3@192.168.1.102:8080
+
+# SOCKS5 代理
+socks5://user3:pass3@192.168.1.102:1080
+socks5://192.168.1.103:1080
 ```
 
 ### 3️⃣ 配置环境变量
@@ -45,8 +52,11 @@ http://user3:pass3@192.168.1.102:8080
 编辑 `.env` 文件：
 
 ```env
-# 代理服务监听端口
+# HTTP 代理服务监听端口
 PROXY_PORT=8282
+
+# SOCKS5 代理服务监听端口
+SOCKS5_PORT=8281
 
 # 代理文件路径
 PROXY_FILE=proxy.txt
@@ -60,7 +70,7 @@ MAX_IDLE_CONNS_PER_HOST=100
 # 请求超时时间（秒）
 REQUEST_TIMEOUT=30
 
-# 代理服务器认证（留空则不需要认证）
+# 代理服务器认证（留空则不需要认证，HTTP和SOCKS5共用）
 AUTH_USERNAME=admin
 AUTH_PASSWORD=123456
 ```
@@ -80,16 +90,22 @@ go build -o proxyflow ./cmd/proxyflow
 
 ### 5️⃣ 使用代理
 
-将你的HTTP客户端代理设置为：
+将你的客户端代理设置为：
 
-- **无认证模式**：`http://localhost:8282`
-- **认证模式**：`http://admin:123456@localhost:8282`
+**HTTP 代理入口：**
+- 无认证模式：`http://localhost:8282`
+- 认证模式：`http://admin:123456@localhost:8282`
+
+**SOCKS5 代理入口：**
+- 无认证模式：`socks5://localhost:8281`
+- 认证模式：`socks5://admin:123456@localhost:8281`
 
 ## 📋 配置说明
 
 | 配置项 | 说明 | 默认值 | 示例 |
 |--------|------|--------|------|
-| `PROXY_PORT` | 代理服务监听端口 | `8282` | `8080` |
+| `PROXY_PORT` | HTTP 代理服务监听端口 | `8282` | `8080` |
+| `SOCKS5_PORT` | SOCKS5 代理服务监听端口 | `8281` | `10800` |
 | `PROXY_FILE` | 代理列表文件路径 | `proxy.txt` | `proxies.txt` |
 | `MAX_IDLE_CONNS` | 总的最大空闲连接数 | `1000` | `2000` |
 | `MAX_IDLE_CONNS_PER_HOST` | 每个主机的最大空闲连接数 | `100` | `200` |
@@ -110,9 +126,9 @@ mkdir proxy-flow && cd proxy-flow
 ```bash
 cat > proxy.txt << EOF
 # 代理列表文件
-# 格式: http://username:password@ip:port
+# 支持 HTTP 和 SOCKS5 代理
 http://user1:pass1@proxy1.example.com:8080
-http://user2:pass2@proxy2.example.com:8080
+socks5://user2:pass2@proxy2.example.com:1080
 EOF
 ```
 
@@ -125,16 +141,18 @@ services:
     image: ghcr.io/rfym21/proxy-flow:latest
     container_name: proxy-flow
     ports:
-      - "8282:8282"
+      - "8282:8282"   # HTTP 代理端口
+      - "8281:8281"   # SOCKS5 代理端口
     volumes:
       - ./proxy.txt:/app/proxy.txt
     environment:
       - PROXY_PORT=8282
+      - SOCKS5_PORT=8281
       - PROXY_FILE=proxy.txt
       - MAX_IDLE_CONNS=1000
       - MAX_IDLE_CONNS_PER_HOST=100
       - REQUEST_TIMEOUT=30
-      # 认证配置（可选）
+      # 认证配置（可选，HTTP和SOCKS5共用）
       - AUTH_USERNAME=
       - AUTH_PASSWORD=
     restart: unless-stopped
@@ -162,8 +180,10 @@ echo "http://user:pass@proxy.example.com:8080" > proxy.txt
 docker run -d \
   --name proxyflow \
   -p 8282:8282 \
+  -p 8281:8281 \
   -v $(pwd)/proxy.txt:/app/proxy.txt \
   -e PROXY_PORT=8282 \
+  -e SOCKS5_PORT=8281 \
   -e PROXY_FILE=/app/proxy.txt \
   -e MAX_IDLE_CONNS=1000 \
   -e MAX_IDLE_CONNS_PER_HOST=100 \
@@ -179,11 +199,17 @@ docker run -d \
 ### cURL 示例
 
 ```bash
-# HTTP请求
-curl.exe -v -x http://127.0.0.1:8282 http://httpbin.org/ip
+# HTTP 代理 - HTTP 请求
+curl -v -x http://127.0.0.1:8282 http://httpbin.org/ip
 
-# HTTPS请求
-curl.exe -v -x http://127.0.0.1:8282 https://httpbin.org/ip
+# HTTP 代理 - HTTPS 请求
+curl -v -x http://127.0.0.1:8282 https://httpbin.org/ip
+
+# SOCKS5 代理 - HTTP 请求
+curl -v -x socks5://127.0.0.1:8281 http://httpbin.org/ip
+
+# SOCKS5 代理 - HTTPS 请求
+curl -v -x socks5://127.0.0.1:8281 https://httpbin.org/ip
 ```
 
 ## 🧪 连通性测试

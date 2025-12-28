@@ -5,19 +5,21 @@ services:
     image: ghcr.io/rfym21/proxy-flow:latest
     container_name: proxy-flow
     ports:
-      - "8282:8282"
+      - "8282:8282"   # HTTP 代理端口
+      - "8281:8281"   # SOCKS5 代理端口
     volumes:
       # 挂载代理列表文件
       - ./proxy.txt:/app/proxy.txt
     environment:
       # 代理服务器配置
       - PROXY_PORT=8282
+      - SOCKS5_PORT=8281
       - PROXY_FILE=proxy.txt
       - MAX_IDLE_CONNS=1000
       - MAX_IDLE_CONNS_PER_HOST=100
       - MAX_RETRY_COUNT=3
       - REQUEST_TIMEOUT=30
-      # 认证配置（可选，留空则无认证）
+      # 认证配置（可选，留空则无认证，HTTP和SOCKS5共用）
       - AUTH_USERNAME=
       - AUTH_PASSWORD=
     restart: unless-stopped

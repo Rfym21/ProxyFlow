@@ -16,7 +16,8 @@ import (
 // 包含了代理服务器运行所需的所有配置参数，包括网络设置、
 // 资源配置和认证参数等。
 type Config struct {
-	ProxyPort            string        // 代理服务监听端口
+	ProxyPort            string        // HTTP 代理服务监听端口
+	SOCKS5Port           string        // SOCKS5 代理服务监听端口
 	ProxyFile            string        // 代理文件路径
 	MaxIdleConns         int           // 总的最大空闲连接数
 	MaxIdleConnsPerHost  int           // 每个主机的最大空闲连接数
@@ -36,6 +37,7 @@ type Config struct {
 func Load() *Config {
 	return &Config{
 		ProxyPort:            getEnv("PROXY_PORT", "8282"),
+		SOCKS5Port:           getEnv("SOCKS5_PORT", "8281"),
 		ProxyFile:            getEnv("PROXY_FILE", "proxy.txt"),
 		MaxIdleConns:         getEnvInt("MAX_IDLE_CONNS", 1000),
 		MaxIdleConnsPerHost:  getEnvInt("MAX_IDLE_CONNS_PER_HOST", 100),

@@ -21,8 +21,8 @@ func main() {
 
 	// 加载配置
 	cfg := config.Load()
-	log.Printf("启动 ProxyFlow，配置信息: 端口=%s, 代理文件=%s, MaxIdleConns=%d, MaxIdleConnsPerHost=%d",
-		cfg.ProxyPort, cfg.ProxyFile, cfg.MaxIdleConns, cfg.MaxIdleConnsPerHost)
+	log.Printf("启动 ProxyFlow，配置信息: HTTP端口=%s, SOCKS5端口=%s, 代理文件=%s, MaxIdleConns=%d, MaxIdleConnsPerHost=%d",
+		cfg.ProxyPort, cfg.SOCKS5Port, cfg.ProxyFile, cfg.MaxIdleConns, cfg.MaxIdleConnsPerHost)
 
 	// 创建代理池
 	proxyPool, err := pool.NewPool(cfg.ProxyFile)
@@ -36,10 +36,18 @@ func main() {
 	// 设置优雅关闭
 	setupGracefulShutdown(proxyServer)
 
-	// 启动服务器
-	log.Printf("ProxyFlow 已准备就绪，开始处理请求")
+	// 启动 SOCKS5 服务器（在 goroutine 中）
+	go func() {
+		log.Printf("ProxyFlow SOCKS5 已准备就绪，开始处理请求")
+		if err := proxyServer.StartSOCKS5(cfg.SOCKS5Port); err != nil {
+			log.Printf("SOCKS5 服务器关闭: %v", err)
+		}
+	}()
+
+	// 启动 HTTP 服务器（阻塞主 goroutine）
+	log.Printf("ProxyFlow HTTP 已准备就绪，开始处理请求")
 	if err := proxyServer.Start(cfg.ProxyPort); err != nil {
-		log.Printf("服务器关闭: %v", err)
+		log.Printf("HTTP 服务器关闭: %v", err)
 	}
 }
 

@@ -8,6 +8,7 @@ package server
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -15,6 +16,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"golang.org/x/net/proxy"
 
 	"github.com/rfym21/ProxyFlow/internal/auth"
 	"github.com/rfym21/ProxyFlow/internal/client"
@@ -27,6 +30,18 @@ const (
 	DefaultHTTPSPort = "443"
 	// ProxyResponseBufferSize 代理响应缓冲区大小
 	ProxyResponseBufferSize = 1024
+
+	// SOCKS5 协议常量
+	socks5Version          = 0x05
+	socks5AuthNone         = 0x00
+	socks5AuthPassword     = 0x02
+	socks5AuthNoAcceptable = 0xFF
+	socks5CmdConnect       = 0x01
+	socks5AddrTypeIPv4     = 0x01
+	socks5AddrTypeDomain   = 0x03
+	socks5AddrTypeIPv6     = 0x04
+	socks5ReplySuccess     = 0x00
+	socks5ReplyFailure     = 0x01
 )
 
 // Server HTTP代理服务器。
@@ -34,12 +49,13 @@ const (
 // 代理服务器核心实现，支持HTTP和HTTPS流量代理。
 // 提供认证、连接池管理和上游代理负载均衡等功能。
 type Server struct {
-	pool         *pool.Pool     // 代理池
-	client       *client.Client // HTTP客户端
-	timeout      time.Duration  // 请求超时时间
-	authUsername string         // 认证用户名
-	authPassword string         // 认证密码
-	listener     net.Listener   // TCP监听器
+	pool            *pool.Pool     // 代理池
+	client          *client.Client // HTTP客户端
+	timeout         time.Duration  // 请求超时时间
+	authUsername    string         // 认证用户名
+	authPassword    string         // 认证密码
+	listener        net.Listener   // HTTP TCP监听器
+	socks5Listener  net.Listener   // SOCKS5 TCP监听器
 }
 
 // NewServer 创建新的代理服务器实例。
@@ -105,17 +121,24 @@ func (s *Server) Start(port string) error {
 //   - error: 关闭过程中的错误，成功时为nil
 func (s *Server) Shutdown() error {
 	log.Printf("正在关闭代理服务器...")
-	
-	// 关闭TCP监听器
+
+	// 关闭HTTP TCP监听器
 	if s.listener != nil {
 		if err := s.listener.Close(); err != nil {
-			log.Printf("关闭监听器时出错: %v", err)
+			log.Printf("关闭HTTP监听器时出错: %v", err)
 		}
 	}
-	
+
+	// 关闭SOCKS5 TCP监听器
+	if s.socks5Listener != nil {
+		if err := s.socks5Listener.Close(); err != nil {
+			log.Printf("关闭SOCKS5监听器时出错: %v", err)
+		}
+	}
+
 	// 清理HTTP客户端连接池
 	s.client.Close()
-	
+
 	log.Printf("代理服务器已成功关闭")
 	return nil
 }
@@ -353,19 +376,35 @@ func (s *Server) handleHTTPTCP(conn net.Conn, reader *bufio.Reader, firstLine st
 
 // connectThroughProxy 通过代理服务器连接到目标地址。
 //
-// 建立到上游代理的连接，发送CONNECT请求以建立隧道。
-// 支持代理认证和响应验证。
+// 建立到上游代理的连接，根据代理类型使用不同的隧道协议。
+// HTTP代理使用CONNECT方法，SOCKS5使用原生SOCKS5协议。
 //
 // 参数：
 //   - destAddr: 目标地址（host:port格式）
-//   - proxy: 代理服务器信息
+//   - proxyInfo: 代理服务器信息
 //
 // 返回值：
 //   - net.Conn: 建立的代理连接
 //   - error: 连接错误，成功时为nil
-func (s *Server) connectThroughProxy(destAddr string, proxy models.ProxyInfo) (net.Conn, error) {
+func (s *Server) connectThroughProxy(destAddr string, proxyInfo models.ProxyInfo) (net.Conn, error) {
+	if proxyInfo.IsSOCKS5() {
+		return s.connectThroughSOCKS5(destAddr, proxyInfo)
+	}
+	return s.connectThroughHTTPProxy(destAddr, proxyInfo)
+}
+
+// connectThroughHTTPProxy 通过 HTTP 代理建立 CONNECT 隧道。
+//
+// 参数：
+//   - destAddr: 目标地址（host:port格式）
+//   - proxyInfo: 代理服务器信息
+//
+// 返回值：
+//   - net.Conn: 建立的代理连接
+//   - error: 连接错误，成功时为nil
+func (s *Server) connectThroughHTTPProxy(destAddr string, proxyInfo models.ProxyInfo) (net.Conn, error) {
 	// 连接到代理服务器
-	proxyConn, err := net.Dial("tcp", proxy.Host)
+	proxyConn, err := net.Dial("tcp", proxyInfo.Host)
 	if err != nil {
 		return nil, err
 	}
@@ -377,8 +416,8 @@ func (s *Server) connectThroughProxy(destAddr string, proxy models.ProxyInfo) (n
 	connectReq += "Content-Length: 0\r\n"
 
 	// 添加代理认证
-	if proxy.Username != "" {
-		authValue := auth.EncodeBasicAuth(proxy.Username, proxy.Password)
+	if proxyInfo.Username != "" {
+		authValue := auth.EncodeBasicAuth(proxyInfo.Username, proxyInfo.Password)
 		authHeader := fmt.Sprintf("Proxy-Authorization: %s\r\n", authValue)
 		connectReq += authHeader
 	}
@@ -407,6 +446,40 @@ func (s *Server) connectThroughProxy(destAddr string, proxy models.ProxyInfo) (n
 	}
 
 	return proxyConn, nil
+}
+
+// connectThroughSOCKS5 通过 SOCKS5 代理建立隧道。
+//
+// 参数：
+//   - destAddr: 目标地址（host:port格式）
+//   - proxyInfo: 代理服务器信息
+//
+// 返回值：
+//   - net.Conn: 建立的代理连接
+//   - error: 连接错误，成功时为nil
+func (s *Server) connectThroughSOCKS5(destAddr string, proxyInfo models.ProxyInfo) (net.Conn, error) {
+	// 配置 SOCKS5 认证
+	var socks5Auth *proxy.Auth
+	if proxyInfo.Username != "" {
+		socks5Auth = &proxy.Auth{
+			User:     proxyInfo.Username,
+			Password: proxyInfo.Password,
+		}
+	}
+
+	// 创建 SOCKS5 dialer
+	dialer, err := proxy.SOCKS5("tcp", proxyInfo.Host, socks5Auth, proxy.Direct)
+	if err != nil {
+		return nil, fmt.Errorf("创建SOCKS5 dialer失败: %v", err)
+	}
+
+	// 通过 SOCKS5 代理连接到目标
+	conn, err := dialer.Dial("tcp", destAddr)
+	if err != nil {
+		return nil, fmt.Errorf("SOCKS5代理连接失败: %v", err)
+	}
+
+	return conn, nil
 }
 
 // copyData 在两个连接间复制数据。
@@ -486,4 +559,281 @@ func (s *Server) formatProxyURL(proxy models.ProxyInfo) string {
 		return fmt.Sprintf("%s://%s:***@%s", proxy.URL.Scheme, proxy.Username, proxy.Host)
 	}
 	return fmt.Sprintf("%s://%s", proxy.URL.Scheme, proxy.Host)
+}
+
+// StartSOCKS5 启动 SOCKS5 代理服务器并监听指定端口。
+//
+// 创建TCP监听器并开始接收SOCKS5客户端连接。每个连接
+// 在独立的goroutine中处理，支持并发请求。
+//
+// 参数：
+//   - port: 监听端口号
+//
+// 返回值：
+//   - error: 服务器启动错误，成功时为nil
+func (s *Server) StartSOCKS5(port string) error {
+	listener, err := net.Listen("tcp", ":"+port)
+	if err != nil {
+		return err
+	}
+	s.socks5Listener = listener
+
+	log.Printf("SOCKS5 代理服务器正在端口 %s 上启动", port)
+	log.Printf("使用 %d 个代理进行轮询", s.pool.Size())
+
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Printf("SOCKS5 接受连接时出错: %v", err)
+			return err
+		}
+
+		go s.handleSOCKS5(conn)
+	}
+}
+
+// handleSOCKS5 处理 SOCKS5 客户端连接。
+//
+// 实现完整的 SOCKS5 协议握手、认证和隧道建立流程。
+//
+// 参数：
+//   - conn: 客户端 TCP 连接
+func (s *Server) handleSOCKS5(conn net.Conn) {
+	defer conn.Close()
+
+	clientIP := conn.RemoteAddr().String()
+	log.Printf("SOCKS5 新连接来自: %s", clientIP)
+
+	// 1. 握手阶段：读取客户端支持的认证方法
+	// 格式: VER | NMETHODS | METHODS
+	header := make([]byte, 2)
+	if _, err := io.ReadFull(conn, header); err != nil {
+		return
+	}
+
+	if header[0] != socks5Version {
+		return
+	}
+
+	nMethods := int(header[1])
+	methods := make([]byte, nMethods)
+	if _, err := io.ReadFull(conn, methods); err != nil {
+		return
+	}
+
+	// 2. 选择认证方法
+	var selectedMethod byte
+	if s.authUsername == "" && s.authPassword == "" {
+		// 无需认证
+		selectedMethod = socks5AuthNone
+	} else {
+		// 需要用户名密码认证
+		hasPasswordAuth := false
+		for _, m := range methods {
+			if m == socks5AuthPassword {
+				hasPasswordAuth = true
+				break
+			}
+		}
+		if hasPasswordAuth {
+			selectedMethod = socks5AuthPassword
+		} else {
+			// 客户端不支持密码认证
+			conn.Write([]byte{socks5Version, socks5AuthNoAcceptable})
+			return
+		}
+	}
+
+	// 发送认证方法选择响应
+	conn.Write([]byte{socks5Version, selectedMethod})
+
+	// 3. 用户名密码认证（如果需要）
+	if selectedMethod == socks5AuthPassword {
+		if !s.handleSOCKS5Auth(conn) {
+			return
+		}
+	}
+
+	// 4. 读取请求
+	// 格式: VER | CMD | RSV | ATYP | DST.ADDR | DST.PORT
+	request := make([]byte, 4)
+	if _, err := io.ReadFull(conn, request); err != nil {
+		return
+	}
+
+	if request[0] != socks5Version {
+		s.sendSOCKS5Reply(conn, socks5ReplyFailure, nil)
+		return
+	}
+
+	cmd := request[1]
+	if cmd != socks5CmdConnect {
+		// 只支持 CONNECT 命令
+		s.sendSOCKS5Reply(conn, socks5ReplyFailure, nil)
+		return
+	}
+
+	// 5. 解析目标地址
+	destAddr, err := s.parseSOCKS5Address(conn, request[3])
+	if err != nil {
+		s.sendSOCKS5Reply(conn, socks5ReplyFailure, nil)
+		return
+	}
+
+	// 6. 通过代理池连接到目标
+	var upstreamConn net.Conn
+
+	for i := 0; i < s.pool.Size(); i++ {
+		proxyInfo := s.pool.NextProxy()
+		upstreamConn, err = s.connectThroughProxy(destAddr, proxyInfo)
+		if err == nil {
+			log.Printf("SOCKS5 CONNECT %s -> 代理: %s", destAddr, s.formatProxyURL(proxyInfo))
+			break
+		}
+	}
+
+	if err != nil {
+		s.sendSOCKS5Reply(conn, socks5ReplyFailure, nil)
+		return
+	}
+	defer upstreamConn.Close()
+
+	// 7. 发送成功响应
+	// 使用 0.0.0.0:0 作为绑定地址
+	s.sendSOCKS5Reply(conn, socks5ReplySuccess, &net.TCPAddr{IP: net.IPv4zero, Port: 0})
+
+	// 8. 双向数据转发
+	go s.copyData(upstreamConn, conn)
+	s.copyData(conn, upstreamConn)
+}
+
+// handleSOCKS5Auth 处理 SOCKS5 用户名密码认证。
+//
+// 参数：
+//   - conn: 客户端连接
+//
+// 返回值：
+//   - bool: 认证是否成功
+func (s *Server) handleSOCKS5Auth(conn net.Conn) bool {
+	// 格式: VER | ULEN | UNAME | PLEN | PASSWD
+	header := make([]byte, 2)
+	if _, err := io.ReadFull(conn, header); err != nil {
+		return false
+	}
+
+	// 认证子协商版本应为 0x01
+	if header[0] != 0x01 {
+		conn.Write([]byte{0x01, 0x01}) // 认证失败
+		return false
+	}
+
+	usernameLen := int(header[1])
+	username := make([]byte, usernameLen)
+	if _, err := io.ReadFull(conn, username); err != nil {
+		return false
+	}
+
+	passwordLenBuf := make([]byte, 1)
+	if _, err := io.ReadFull(conn, passwordLenBuf); err != nil {
+		return false
+	}
+
+	passwordLen := int(passwordLenBuf[0])
+	password := make([]byte, passwordLen)
+	if _, err := io.ReadFull(conn, password); err != nil {
+		return false
+	}
+
+	// 验证用户名密码
+	if string(username) == s.authUsername && string(password) == s.authPassword {
+		conn.Write([]byte{0x01, 0x00}) // 认证成功
+		return true
+	}
+
+	conn.Write([]byte{0x01, 0x01}) // 认证失败
+	return false
+}
+
+// parseSOCKS5Address 解析 SOCKS5 目标地址。
+//
+// 参数：
+//   - conn: 客户端连接
+//   - addrType: 地址类型
+//
+// 返回值：
+//   - string: 目标地址（host:port 格式）
+//   - error: 解析错误
+func (s *Server) parseSOCKS5Address(conn net.Conn, addrType byte) (string, error) {
+	var host string
+
+	switch addrType {
+	case socks5AddrTypeIPv4:
+		addr := make([]byte, 4)
+		if _, err := io.ReadFull(conn, addr); err != nil {
+			return "", err
+		}
+		host = net.IP(addr).String()
+
+	case socks5AddrTypeDomain:
+		lenBuf := make([]byte, 1)
+		if _, err := io.ReadFull(conn, lenBuf); err != nil {
+			return "", err
+		}
+		domain := make([]byte, lenBuf[0])
+		if _, err := io.ReadFull(conn, domain); err != nil {
+			return "", err
+		}
+		host = string(domain)
+
+	case socks5AddrTypeIPv6:
+		addr := make([]byte, 16)
+		if _, err := io.ReadFull(conn, addr); err != nil {
+			return "", err
+		}
+		host = net.IP(addr).String()
+
+	default:
+		return "", fmt.Errorf("不支持的地址类型: %d", addrType)
+	}
+
+	// 读取端口（2字节，大端序）
+	portBuf := make([]byte, 2)
+	if _, err := io.ReadFull(conn, portBuf); err != nil {
+		return "", err
+	}
+	port := binary.BigEndian.Uint16(portBuf)
+
+	return fmt.Sprintf("%s:%d", host, port), nil
+}
+
+// sendSOCKS5Reply 发送 SOCKS5 响应。
+//
+// 参数：
+//   - conn: 客户端连接
+//   - reply: 响应状态码
+//   - addr: 绑定地址（可为 nil）
+func (s *Server) sendSOCKS5Reply(conn net.Conn, reply byte, addr *net.TCPAddr) {
+	// 格式: VER | REP | RSV | ATYP | BND.ADDR | BND.PORT
+	response := []byte{socks5Version, reply, 0x00}
+
+	if addr == nil {
+		// 使用 0.0.0.0:0
+		response = append(response, socks5AddrTypeIPv4)
+		response = append(response, 0, 0, 0, 0) // 0.0.0.0
+		response = append(response, 0, 0)       // port 0
+	} else {
+		ip := addr.IP.To4()
+		if ip != nil {
+			response = append(response, socks5AddrTypeIPv4)
+			response = append(response, ip...)
+		} else {
+			response = append(response, socks5AddrTypeIPv6)
+			response = append(response, addr.IP.To16()...)
+		}
+		portBytes := make([]byte, 2)
+		binary.BigEndian.PutUint16(portBytes, uint16(addr.Port))
+		response = append(response, portBytes...)
+	}
+
+	conn.Write(response)
 }

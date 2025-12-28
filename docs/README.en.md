@@ -12,7 +12,8 @@
 
 ## 🚀 Features
 
-- ✅ **Dual Protocol Support** - Complete HTTP/HTTPS proxy support
+- ✅ **Multi-Protocol Support** - Complete HTTP/HTTPS/SOCKS5 proxy support
+- ✅ **Dual Entry Service** - Simultaneous HTTP and SOCKS5 proxy entry points
 - ✅ **Upstream Proxy Authentication** - Support for Basic Auth authenticated upstream proxies
 - ✅ **Intelligent Load Balancing** - Round-robin algorithm for automatic request distribution
 - ✅ **Connection Pool Management** - Efficient connection reuse mechanism
@@ -32,12 +33,18 @@ Edit the `proxy.txt` file, one proxy per line:
 
 ```txt
 # Proxy list file
-# Format: http://username:password@ip:port
+# Supported formats:
+#   HTTP/HTTPS: http://username:password@ip:port
+#   SOCKS5:     socks5://username:password@ip:port
 # Empty lines and lines starting with # will be ignored
 
+# HTTP proxies
 http://user1:pass1@192.168.1.100:8080
 http://user2:pass2@192.168.1.101:8080
-http://user3:pass3@192.168.1.102:8080
+
+# SOCKS5 proxies
+socks5://user3:pass3@192.168.1.102:1080
+socks5://192.168.1.103:1080
 ```
 
 ### 3️⃣ Configure Environment Variables
@@ -45,8 +52,11 @@ http://user3:pass3@192.168.1.102:8080
 Edit the `.env` file:
 
 ```env
-# Proxy service listening port
+# HTTP proxy service listening port
 PROXY_PORT=8282
+
+# SOCKS5 proxy service listening port
+SOCKS5_PORT=8281
 
 # Proxy file path
 PROXY_FILE=proxy.txt
@@ -60,7 +70,7 @@ MAX_IDLE_CONNS_PER_HOST=100
 # Request timeout in seconds
 REQUEST_TIMEOUT=30
 
-# Proxy server authentication (leave empty for no authentication)
+# Proxy server authentication (leave empty for no authentication, shared by HTTP and SOCKS5)
 AUTH_USERNAME=admin
 AUTH_PASSWORD=123456
 ```
@@ -80,16 +90,22 @@ go build -o proxyflow ./cmd/proxyflow
 
 ### 5️⃣ Use the Proxy
 
-Configure your HTTP client proxy to:
+Configure your client proxy to:
 
-- **No Authentication Mode**: `http://localhost:8282`
-- **Authentication Mode**: `http://admin:123456@localhost:8282`
+**HTTP Proxy Entry:**
+- No Authentication Mode: `http://localhost:8282`
+- Authentication Mode: `http://admin:123456@localhost:8282`
+
+**SOCKS5 Proxy Entry:**
+- No Authentication Mode: `socks5://localhost:8281`
+- Authentication Mode: `socks5://admin:123456@localhost:8281`
 
 ## 📋 Configuration
 
 | Config Item | Description | Default | Example |
 |--------|------|--------|------|
-| `PROXY_PORT` | Proxy service listening port | `8282` | `8080` |
+| `PROXY_PORT` | HTTP proxy service listening port | `8282` | `8080` |
+| `SOCKS5_PORT` | SOCKS5 proxy service listening port | `8281` | `10800` |
 | `PROXY_FILE` | Proxy list file path | `proxy.txt` | `proxies.txt` |
 | `MAX_IDLE_CONNS` | Maximum total idle connections | `1000` | `2000` |
 | `MAX_IDLE_CONNS_PER_HOST` | Maximum idle connections per host | `100` | `200` |
@@ -108,11 +124,11 @@ mkdir proxy-flow && cd proxy-flow
 
 2. **Create proxy list file**
 ```bash
-catxy.txt << EOF
+cat > proxy.txt << EOF
 # Proxy list file
-# Format: http://username:password@ip:port
+# Supports HTTP and SOCKS5 proxies
 http://user1:pass1@proxy1.example.com:8080
-http://user2:pass2@proxy2.example.com:8080
+socks5://user2:pass2@proxy2.example.com:1080
 EOF
 ```
 
@@ -122,19 +138,21 @@ version: '3.8'
 
 services:
   proxy-flow:
-    image: ghcr.io/rfym21/proxy-flow:lt
+    image: ghcr.io/rfym21/proxy-flow:latest
     container_name: proxy-flow
     ports:
-      - "8282:8282"
+      - "8282:8282"   # HTTP proxy port
+      - "8281:8281"   # SOCKS5 proxy port
     volumes:
       - ./proxy.txt:/app/proxy.txt
     environment:
       - PROXY_PORT=8282
+      - SOCKS5_PORT=8281
       - PROXY_FILE=proxy.txt
       - MAX_IDLE_CONNS=1000
       - MAX_IDLE_CONNS_PER_HOST=100
       - REQUEST_TIMEOUT=30
-      # Authentication config (optional)
+      # Authentication config (optional, shared by HTTP and SOCKS5)
       - AUTH_USERNAME=
       - AUTH_PASSWORD=
     restart: unless-stopped
@@ -156,14 +174,16 @@ docker compose down
 
 ```bash
 # Create proxy list file
-echo "http://user:pa.example.com:8080" > proxy.txt
+echo "http://user:pass@proxy.example.com:8080" > proxy.txt
 
 # Run container
 docker run -d \
   --name proxyflow \
   -p 8282:8282 \
+  -p 8281:8281 \
   -v $(pwd)/proxy.txt:/app/proxy.txt \
   -e PROXY_PORT=8282 \
+  -e SOCKS5_PORT=8281 \
   -e PROXY_FILE=/app/proxy.txt \
   -e MAX_IDLE_CONNS=1000 \
   -e MAX_IDLE_CONNS_PER_HOST=100 \
@@ -179,11 +199,17 @@ docker run -d \
 ### cURL Examples
 
 ```bash
-# HTTP request
-curl.exe -v -x http://127.0.0.1:8282 http://httpbin.org/ip
+# HTTP proxy - HTTP request
+curl -v -x http://127.0.0.1:8282 http://httpbin.org/ip
 
-# HTTPS request
-curl.exe -v -x http://127.0.0.1:8282 https://httpbin.org/ip
+# HTTP proxy - HTTPS request
+curl -v -x http://127.0.0.1:8282 https://httpbin.org/ip
+
+# SOCKS5 proxy - HTTP request
+curl -v -x socks5://127.0.0.1:8281 http://httpbin.org/ip
+
+# SOCKS5 proxy - HTTPS request
+curl -v -x socks5://127.0.0.1:8281 https://httpbin.org/ip
 ```
 
 ## 🧪 Connectivity Testing
