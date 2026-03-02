@@ -16,15 +16,22 @@ import (
 // 包含了代理服务器运行所需的所有配置参数，包括网络设置、
 // 资源配置和认证参数等。
 type Config struct {
-	ProxyPort            string        // HTTP 代理服务监听端口
-	SOCKS5Port           string        // SOCKS5 代理服务监听端口
+	ProxyPort            string        // 代理服务监听端口（HTTP/SOCKS5 统一入口）
 	ProxyFile            string        // 代理文件路径
+	FailureProxyFile     string        // 失效代理文件路径
 	MaxIdleConns         int           // 总的最大空闲连接数
 	MaxIdleConnsPerHost  int           // 每个主机的最大空闲连接数
 	MaxRetryCount        int           // 单个请求的最大代理重试次数
 	RequestTimeout       time.Duration // 请求超时时间
 	AuthUsername         string        // 代理服务器认证用户名
 	AuthPassword         string        // 代理服务器认证密码
+
+	// API 配置
+	APIEnabled  bool   // 是否启用 API
+	APIPort     string // API 服务端口
+	APIKey      string // API 访问密钥
+	CheckURL    string // 代理检查 URL
+	CheckRetry  int    // 代理检查失败重试次数
 }
 
 // Load 从环境变量加载应用配置。
@@ -36,16 +43,38 @@ type Config struct {
 //   - *Config: 配置实例指针
 func Load() *Config {
 	return &Config{
-		ProxyPort:            getEnv("PROXY_PORT", "8282"),
-		SOCKS5Port:           getEnv("SOCKS5_PORT", "8281"),
+		ProxyPort:            getEnv("PROXY_PORT", "8280"),
 		ProxyFile:            getEnv("PROXY_FILE", "proxy.txt"),
+		FailureProxyFile:     getEnv("FAILURE_PROXY_FILE", "failure-proxy.txt"),
 		MaxIdleConns:         getEnvInt("MAX_IDLE_CONNS", 1000),
 		MaxIdleConnsPerHost:  getEnvInt("MAX_IDLE_CONNS_PER_HOST", 100),
 		MaxRetryCount:        getEnvInt("MAX_RETRY_COUNT", 3),
 		RequestTimeout:       time.Duration(getEnvInt("REQUEST_TIMEOUT", 30)) * time.Second,
 		AuthUsername:         getEnv("AUTH_USERNAME", ""),
 		AuthPassword:         getEnv("AUTH_PASSWORD", ""),
+
+		// API 配置
+		APIEnabled:  getEnvBool("API_ENABLED", false),
+		APIPort:     getEnv("API_PORT", "8281"),
+		APIKey:      getEnv("API_KEY", ""),
+		CheckURL:    getEnv("CHECK_URL", "https://www.google.com"),
+		CheckRetry:  getEnvInt("CHECK_RETRY", 5),
 	}
+}
+
+// getEnvBool 获取环境变量布尔值。
+//
+// 参数：
+//   - key: 环境变量名称
+//   - defaultValue: 默认值，当环境变量不存在时使用
+//
+// 返回值：
+//   - bool: 解析后的布尔值或默认值
+func getEnvBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		return value == "true" || value == "1" || value == "yes"
+	}
+	return defaultValue
 }
 
 // getEnv 获取环境变量字符串值。
