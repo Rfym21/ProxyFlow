@@ -7,6 +7,7 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
@@ -205,6 +206,13 @@ func (c *Client) createHTTPClient(proxyInfo models.ProxyInfo) *http.Client {
 		MaxIdleConnsPerHost: c.maxIdleConnsPerHost,
 		IdleConnTimeout:     90 * time.Second,
 		DisableKeepAlives:   false,
+	}
+
+	// https 上游代理常使用自签证书，标准库会对代理做 TLS 握手并默认校验证书，
+	// 导致握手失败。这里对到代理的连接跳过校验。仅在代理 scheme 为 https 时设置，
+	// 避免影响 http 代理下到目标服务器的 TLS 校验。
+	if proxyInfo.URL.Scheme == "https" {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
 
 	// 如果需要认证，包一层添加Proxy-Authorization

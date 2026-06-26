@@ -8,6 +8,7 @@ package server
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -436,8 +437,23 @@ func (s *Server) connectThroughProxy(destAddr string, proxyInfo models.ProxyInfo
 //   - net.Conn: 建立的代理连接
 //   - error: 连接错误，成功时为nil
 func (s *Server) connectThroughHTTPProxy(destAddr string, proxyInfo models.ProxyInfo) (net.Conn, error) {
-	// 连接到代理服务器
-	proxyConn, err := net.Dial("tcp", proxyInfo.Host)
+	// 连接到代理服务器。https 上游代理要求先与代理完成 TLS 握手，
+	// 否则向其发送明文 CONNECT 会失败；自签证书场景跳过校验。
+	var proxyConn net.Conn
+	var err error
+	if proxyInfo.URL.Scheme == "https" {
+		proxyConn, err = tls.DialWithDialer(
+			&net.Dialer{Timeout: s.timeout},
+			"tcp",
+			proxyInfo.Host,
+			&tls.Config{
+				InsecureSkipVerify: true,
+				ServerName:         proxyInfo.URL.Hostname(),
+			},
+		)
+	} else {
+		proxyConn, err = net.Dial("tcp", proxyInfo.Host)
+	}
 	if err != nil {
 		return nil, err
 	}
