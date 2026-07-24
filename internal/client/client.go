@@ -137,7 +137,10 @@ func (c *Client) Do(req *http.Request) (*http.Response, models.ProxyInfo, error)
 // 返回值：
 //   - *http.Client: 对应的HTTP客户端实例
 func (c *Client) getClient(proxy models.ProxyInfo) *http.Client {
-	proxyKey := proxy.Host
+	// key 必须包含协议与认证信息：住宅代理常以「同一 host:port + 不同 username」
+	// 区分出口，若仅用 Host 作 key，后续不同凭据的代理会复用首个 client，
+	// 导致其认证头被固化、出口 IP 永远停在第一个，轮换失效。
+	proxyKey := fmt.Sprintf("%s://%s:%s@%s", proxy.URL.Scheme, proxy.Username, proxy.Password, proxy.Host)
 
 	// 先尝试读锁获取现有客户端
 	c.clientsMux.RLock()

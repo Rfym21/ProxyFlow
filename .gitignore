@@ -11,6 +11,10 @@
 # Test binary, built with `go test -c`
 *.test
 
+# 编译产物(go build 输出,根目录与 cmd/proxyflow/ 均可能落盘)
+/proxyflow
+cmd/proxyflow/proxyflow
+
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*
@@ -31,8 +35,8 @@ go.work.sum
 # .idea/
 # .vscode/
 
+# 运行时数据(含真实上游凭据,严禁入库)
+# proxy.txt 为代理列表,failure-proxy.txt 为失效剔除记录,test-proxy.txt 为本地测试残留
 proxy.txt
-
-# 新的编译产物
-cmd/proxyflow/proxyflow
-cmd/proxyflow/proxyflow.exe
+failure-proxy.txt
+test-proxy.txt

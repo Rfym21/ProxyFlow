@@ -1,0 +1,35 @@
+# HCE 索引忽略清单
+# 仅排除二进制产物、VCS 目录、含敏感信息的运行时数据;
+# 源码、配置模板(.env.example)、文档一律保留索引。
+
+# ===== 编译产物 / 二进制 =====
+/proxyflow
+/proxyflow.exe
+cmd/proxyflow/proxyflow
+cmd/proxyflow/proxyflow.exe
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# ===== VCS =====
+.git/
+
+# ===== 运行时数据(含真实凭据,不入索引) =====
+.env
+.env.local
+proxy.txt
+failure-proxy.txt
+test-proxy.txt
+
+# ===== 测试 / 覆盖率产物 =====
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+
+# ===== Go workspace =====
+go.work
+go.work.sum
