@@ -24,6 +24,8 @@ services:
       # 认证配置（可选，留空则无认证，HTTP和SOCKS5共用）
       - AUTH_USERNAME=
       - AUTH_PASSWORD=
+      # 访问日志（设为 false 关闭每连接/每请求日志）
+      - ACCESS_LOG=true
       # ==================== API 服务配置 ====================
       - API_ENABLED=false
       - API_PORT=8281

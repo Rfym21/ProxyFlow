@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ProxyFlow 是一个用 Go 编写的**上游代理负载均衡器**(代理池管理器)。它本身不是代理,而是在单一 TCP 端口上对外提供 HTTP/SOCKS5 入口,把客户端流量按轮询策略转发到 `proxy.txt` 中的一组上游代理(HTTP/HTTPS/SOCKS5),并管理代理池生命周期(热重载、失效剔除、有效性检查)。
 
-模块路径 `github.com/rfym21/ProxyFlow`,Go 1.24。版本号在 `.version` 文件维护(当前 1.4.2)。
+模块路径 `github.com/rfym21/ProxyFlow`,Go 1.24。版本号在 `.version` 文件维护(当前 1.4.3)。
 
 ## 常用命令
 

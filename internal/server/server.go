@@ -55,6 +55,7 @@ type Server struct {
 	timeout         time.Duration  // 请求超时时间
 	authUsername    string         // 认证用户名
 	authPassword    string         // 认证密码
+	accessLog       bool           // 是否输出访问日志
 	listener        net.Listener   // TCP监听器
 }
 
@@ -68,16 +69,32 @@ type Server struct {
 //   - maxRetryCount: 单个请求的最大代理重试次数
 //   - authUsername: 代理服务器认证用户名，为空则不需要认证
 //   - authPassword: 代理服务器认证密码
+//   - accessLog: 是否输出访问日志（每连接、每请求各一条），关闭后仅保留启动与错误日志
 //
 // 返回值：
 //   - *Server: 配置完成的代理服务器实例
-func NewServer(proxyPool *pool.Pool, timeout time.Duration, maxIdleConns, maxIdleConnsPerHost, maxRetryCount int, authUsername, authPassword string) *Server {
+func NewServer(proxyPool *pool.Pool, timeout time.Duration, maxIdleConns, maxIdleConnsPerHost, maxRetryCount int, authUsername, authPassword string, accessLog bool) *Server {
 	return &Server{
 		pool:         proxyPool,
 		client:       client.NewClient(proxyPool, timeout, maxIdleConns, maxIdleConnsPerHost, maxRetryCount),
 		timeout:      timeout,
 		authUsername: authUsername,
 		authPassword: authPassword,
+		accessLog:    accessLog,
+	}
+}
+
+// logAccess 输出访问日志。
+//
+// 仅在 accessLog 启用时打印，用于每连接、每请求级别的高频日志。
+// 启动、关闭和错误日志不走此方法，始终输出。
+//
+// 参数：
+//   - format: 格式化字符串
+//   - v: 格式化参数
+func (s *Server) logAccess(format string, v ...any) {
+	if s.accessLog {
+		log.Printf(format, v...)
 	}
 }
 
@@ -140,11 +157,11 @@ func (s *Server) handleConnectionWithProtocolDetect(conn net.Conn) {
 
 	if firstByte[0] == socks5Version {
 		// SOCKS5 协议
-		log.Printf("SOCKS5 新连接来自: %s", clientIP)
+		s.logAccess("SOCKS5 新连接来自: %s", clientIP)
 		s.handleSOCKS5WithReader(conn, reader)
 	} else {
 		// HTTP 协议
-		log.Printf("HTTP 新连接来自: %s", clientIP)
+		s.logAccess("HTTP 新连接来自: %s", clientIP)
 		s.handleConnectionWithReader(conn, reader)
 	}
 }
@@ -268,7 +285,7 @@ func (s *Server) handleConnectTCP(conn net.Conn, reader *bufio.Reader, firstLine
 		proxy := s.pool.NextProxy()
 		upstreamConn, err = s.connectThroughProxy(destAddr, proxy)
 		if err == nil {
-			log.Printf("CONNECT %s -> 代理: %s", destAddr, s.formatProxyURL(proxy))
+			s.logAccess("CONNECT %s -> 代理: %s", destAddr, s.formatProxyURL(proxy))
 			break
 		}
 	}
@@ -380,7 +397,7 @@ func (s *Server) handleHTTPTCP(conn net.Conn, reader *bufio.Reader, firstLine st
 	// 通过代理发送请求
 	resp, usedProxy, err := s.client.Do(req)
 	if err == nil {
-		log.Printf("%s %s -> 代理: %s", method, url, s.formatProxyURL(usedProxy))
+		s.logAccess("%s %s -> 代理: %s", method, url, s.formatProxyURL(usedProxy))
 	}
 
 	if err != nil {
@@ -702,7 +719,7 @@ func (s *Server) handleSOCKS5WithReader(conn net.Conn, reader *bufio.Reader) {
 		proxyInfo := s.pool.NextProxy()
 		upstreamConn, err = s.connectThroughProxy(destAddr, proxyInfo)
 		if err == nil {
-			log.Printf("SOCKS5 CONNECT %s -> 代理: %s", destAddr, s.formatProxyURL(proxyInfo))
+			s.logAccess("SOCKS5 CONNECT %s -> 代理: %s", destAddr, s.formatProxyURL(proxyInfo))
 			break
 		}
 	}
@@ -845,7 +862,7 @@ func (s *Server) handleSOCKS5(conn net.Conn) {
 	defer conn.Close()
 
 	clientIP := conn.RemoteAddr().String()
-	log.Printf("SOCKS5 新连接来自: %s", clientIP)
+	s.logAccess("SOCKS5 新连接来自: %s", clientIP)
 
 	// 1. 握手阶段：读取客户端支持的认证方法
 	// 格式: VER | NMETHODS | METHODS
@@ -930,7 +947,7 @@ func (s *Server) handleSOCKS5(conn net.Conn) {
 		proxyInfo := s.pool.NextProxy()
 		upstreamConn, err = s.connectThroughProxy(destAddr, proxyInfo)
 		if err == nil {
-			log.Printf("SOCKS5 CONNECT %s -> 代理: %s", destAddr, s.formatProxyURL(proxyInfo))
+			s.logAccess("SOCKS5 CONNECT %s -> 代理: %s", destAddr, s.formatProxyURL(proxyInfo))
 			break
 		}
 	}

@@ -82,6 +82,10 @@ REQUEST_TIMEOUT=30
 AUTH_USERNAME=
 AUTH_PASSWORD=
 
+# 是否输出访问日志（每连接、每请求各一条）
+# 设为 false 后仅保留启动、热重载、失效剔除与错误日志
+ACCESS_LOG=true
+
 # ==================== API 服务配置 ====================
 
 # 是否启用 API 服务
@@ -137,6 +141,7 @@ go build -o proxyflow ./cmd/proxyflow
 | `REQUEST_TIMEOUT` | 请求超时时间(秒) | `30` | `60` |
 | `AUTH_USERNAME` | 认证用户名 | 空(无认证) | `admin` |
 | `AUTH_PASSWORD` | 认证密码 | 空(无认证) | `123456` |
+| `ACCESS_LOG` | 是否输出访问日志（每连接、每请求各一条） | `true` | `false` |
 
 ### API 配置
 
@@ -249,6 +254,8 @@ services:
       # 认证配置（可选，HTTP和SOCKS5共用）
       - AUTH_USERNAME=
       - AUTH_PASSWORD=
+      # 访问日志（设为 false 关闭每连接/每请求日志）
+      - ACCESS_LOG=true
       # API 服务配置（可选）
       - API_ENABLED=false
       - API_PORT=8281
@@ -291,6 +298,7 @@ docker run -d \
   -e REQUEST_TIMEOUT=30 \
   -e AUTH_USERNAME= \
   -e AUTH_PASSWORD= \
+  -e ACCESS_LOG=true \
   -e API_ENABLED=false \
   -e API_PORT=8281 \
   -e API_KEY= \

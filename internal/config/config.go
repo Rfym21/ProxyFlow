@@ -25,6 +25,7 @@ type Config struct {
 	RequestTimeout       time.Duration // 请求超时时间
 	AuthUsername         string        // 代理服务器认证用户名
 	AuthPassword         string        // 代理服务器认证密码
+	AccessLog            bool          // 是否输出访问日志（每连接、每请求各一条）
 
 	// API 配置
 	APIEnabled  bool   // 是否启用 API
@@ -52,6 +53,7 @@ func Load() *Config {
 		RequestTimeout:       time.Duration(getEnvInt("REQUEST_TIMEOUT", 30)) * time.Second,
 		AuthUsername:         getEnv("AUTH_USERNAME", ""),
 		AuthPassword:         getEnv("AUTH_PASSWORD", ""),
+		AccessLog:            getEnvBool("ACCESS_LOG", true),
 
 		// API 配置
 		APIEnabled:  getEnvBool("API_ENABLED", false),

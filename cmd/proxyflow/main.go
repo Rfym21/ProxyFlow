@@ -32,7 +32,7 @@ func main() {
 	}
 
 	// 创建代理服务器
-	proxyServer := server.NewServer(proxyPool, cfg.RequestTimeout, cfg.MaxIdleConns, cfg.MaxIdleConnsPerHost, cfg.MaxRetryCount, cfg.AuthUsername, cfg.AuthPassword)
+	proxyServer := server.NewServer(proxyPool, cfg.RequestTimeout, cfg.MaxIdleConns, cfg.MaxIdleConnsPerHost, cfg.MaxRetryCount, cfg.AuthUsername, cfg.AuthPassword, cfg.AccessLog)
 
 	// 创建 API 服务器（如果启用）
 	var apiServer *api.Server
