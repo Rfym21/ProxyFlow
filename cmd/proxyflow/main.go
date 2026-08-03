@@ -22,11 +22,16 @@ func main() {
 
 	// 加载配置
 	cfg := config.Load()
-	log.Printf("启动 ProxyFlow，配置信息: 端口=%s (HTTP/SOCKS5 统一入口), 代理文件=%s, MaxIdleConns=%d, MaxIdleConnsPerHost=%d",
-		cfg.ProxyPort, cfg.ProxyFile, cfg.MaxIdleConns, cfg.MaxIdleConnsPerHost)
+	log.Printf("启动 ProxyFlow，配置信息: 端口=%s (HTTP/SOCKS5 统一入口), 代理文件=%s, 远程列表=%d 个, MaxIdleConns=%d, MaxIdleConnsPerHost=%d",
+		cfg.ProxyPort, cfg.ProxyFile, len(cfg.ProxyURLs), cfg.MaxIdleConns, cfg.MaxIdleConnsPerHost)
 
-	// 创建代理池（自动启动文件监听，支持热重载）
-	proxyPool, err := pool.NewPoolWithFailure(cfg.ProxyFile, cfg.FailureProxyFile)
+	// 创建代理池（合并本地文件与远程列表，自动启动热重载与定时刷新）
+	proxyPool, err := pool.NewPoolWithOptions(pool.Options{
+		Files:           cfg.ProxyFiles,
+		URLs:            cfg.ProxyURLs,
+		URLInterval:     cfg.ProxyURLInterval,
+		FailureFilename: cfg.FailureProxyFile,
+	})
 	if err != nil {
 		log.Fatalf("创建代理池失败: %v", err)
 	}

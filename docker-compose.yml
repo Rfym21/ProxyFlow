@@ -8,15 +8,20 @@ services:
       - "8280:8280"   # HTTP/SOCKS5 统一端口
       - "8281:8281"   # API 服务端口（可选）
     volumes:
-      # 挂载代理列表文件
-      - ./proxy.txt:/app/proxy.txt
-      # 挂载失效代理文件
-      - ./failure-proxy.txt:/app/failure-proxy.txt
+      # 挂载数据目录（proxy.txt 与 failure-proxy.txt 放在其中）
+      # 必须挂载目录而非单个文件：单文件 bind mount 下宿主机的修改
+      # 不会触发容器内的 inotify 事件，代理文件热重载会失效
+      - ./data:/app/data
     environment:
       # ==================== 代理服务配置 ====================
       - PROXY_PORT=8280
-      - PROXY_FILE=proxy.txt
-      - FAILURE_PROXY_FILE=failure-proxy.txt
+      # 本地代理文件，逗号分隔可配多个：/app/data/cn.txt,/app/data/us.txt
+      - PROXY_FILE=/app/data/proxy.txt
+      # 远程代理列表地址，逗号分隔可配多个，留空表示不使用
+      - PROXY_URLS=
+      # 远程列表刷新间隔（秒），0 表示只在启动时拉取一次
+      - PROXY_URL_INTERVAL=300
+      - FAILURE_PROXY_FILE=/app/data/failure-proxy.txt
       - MAX_IDLE_CONNS=1000
       - MAX_IDLE_CONNS_PER_HOST=100
       - MAX_RETRY_COUNT=3

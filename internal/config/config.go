@@ -8,6 +8,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -17,7 +18,10 @@ import (
 // 资源配置和认证参数等。
 type Config struct {
 	ProxyPort            string        // 代理服务监听端口（HTTP/SOCKS5 统一入口）
-	ProxyFile            string        // 代理文件路径
+	ProxyFile            string        // 代理文件路径原始值（逗号分隔，用于日志展示）
+	ProxyFiles           []string      // 代理文件路径列表（解析自 PROXY_FILE）
+	ProxyURLs            []string      // 远程代理列表地址（解析自 PROXY_URLS）
+	ProxyURLInterval     time.Duration // 远程代理列表刷新间隔，0 表示只在启动时拉取一次
 	FailureProxyFile     string        // 失效代理文件路径
 	MaxIdleConns         int           // 总的最大空闲连接数
 	MaxIdleConnsPerHost  int           // 每个主机的最大空闲连接数
@@ -43,9 +47,23 @@ type Config struct {
 // 返回值：
 //   - *Config: 配置实例指针
 func Load() *Config {
+	proxyURLs := splitList(getEnv("PROXY_URLS", ""))
+
+	// 配置了远程来源时不再默认加载 proxy.txt：
+	// 纯远程部署通常没有本地文件，否则每次加载都会产生找不到文件的告警。
+	// 需要两者并用时显式设置 PROXY_FILE 即可。
+	defaultProxyFile := "proxy.txt"
+	if len(proxyURLs) > 0 {
+		defaultProxyFile = ""
+	}
+	proxyFile := getEnv("PROXY_FILE", defaultProxyFile)
+
 	return &Config{
 		ProxyPort:            getEnv("PROXY_PORT", "8280"),
-		ProxyFile:            getEnv("PROXY_FILE", "proxy.txt"),
+		ProxyFile:            proxyFile,
+		ProxyFiles:           splitList(proxyFile),
+		ProxyURLs:            proxyURLs,
+		ProxyURLInterval:     time.Duration(getEnvInt("PROXY_URL_INTERVAL", 300)) * time.Second,
 		FailureProxyFile:     getEnv("FAILURE_PROXY_FILE", "failure-proxy.txt"),
 		MaxIdleConns:         getEnvInt("MAX_IDLE_CONNS", 1000),
 		MaxIdleConnsPerHost:  getEnvInt("MAX_IDLE_CONNS_PER_HOST", 100),
@@ -62,6 +80,31 @@ func Load() *Config {
 		CheckURL:    getEnv("CHECK_URL", "https://www.google.com"),
 		CheckRetry:  getEnvInt("CHECK_RETRY", 5),
 	}
+}
+
+// splitList 按逗号切分配置值为字符串列表。
+//
+// 自动去除每项两端空白并丢弃空项，便于 PROXY_FILE、PROXY_URLS
+// 这类「单值或多值」配置沿用同一个环境变量。
+//
+// 参数：
+//   - value: 逗号分隔的原始配置值
+//
+// 返回值：
+//   - []string: 切分后的非空项列表，输入为空时返回 nil
+func splitList(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }
 
 // getEnvBool 获取环境变量布尔值。

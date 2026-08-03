@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-ProxyFlow 是一个用 Go 编写的**上游代理负载均衡器**(代理池管理器)。它本身不是代理,而是在单一 TCP 端口上对外提供 HTTP/SOCKS5 入口,把客户端流量按轮询策略转发到 `proxy.txt` 中的一组上游代理(HTTP/HTTPS/SOCKS5),并管理代理池生命周期(热重载、失效剔除、有效性检查)。
+ProxyFlow 是一个用 Go 编写的**上游代理负载均衡器**(代理池管理器)。它本身不是代理,而是在单一 TCP 端口上对外提供 HTTP/SOCKS5 入口,把客户端流量按轮询策略转发到一组上游代理(HTTP/HTTPS/SOCKS5),并管理代理池生命周期(多来源加载、热重载、失效剔除、有效性检查)。代理来源可以是多个本地文件(`PROXY_FILE`,逗号分隔)与多个远程 HTTP(S) 列表(`PROXY_URLS`,逗号分隔),两者可混用。
 
-模块路径 `github.com/rfym21/ProxyFlow`,Go 1.24。版本号在 `.version` 文件维护(当前 1.4.3)。
+模块路径 `github.com/rfym21/ProxyFlow`,Go 1.24。版本号在 `.version` 文件维护(当前 1.4.4)。
 
 ## 常用命令
 
@@ -45,10 +45,13 @@ Docker:多阶段构建,`CGO_ENABLED=0 GOOS=linux`(见 Dockerfile);`docker compos
 ## 关键约定与坑点
 
 - **上游 HTTPS 代理的自签证书**:当上游代理 scheme 是 `https` 时,代码对"到代理"的 TLS 握手设置 `InsecureSkipVerify: true`(见 `client.createHTTPClient` 与 `server.connectThroughHTTPProxy`)。这是刻意为之(最近一次 fix `cdaffa3` 专门解决 502),**不要"顺手"收紧**;且仅在 scheme=https 时设置,避免影响"到目标服务器"的正常 TLS 校验。
-- **代理池热重载**:`internal/pool/pool.go` 用 fsnotify 监听**代理文件所在目录**(而非文件本身,规避部分系统问题),匹配 `filepath.Base` 后在 Write/Create 事件触发 `Reload`。轮询索引 `current` 用 `sync/atomic` 原子自增,代理列表本身用 `sync.RWMutex` 保护。
-- **失效代理剔除**:`pool.MarkFailed` 把代理从内存移除、追加到 `failure-proxy.txt`,并**重写** `proxy.txt`(只保留原文件的注释/空行 + 当前有效代理)。注意它会触发 fsnotify 的 Write 事件——重载逻辑需能容忍自写自触。
+- **代理池热重载**:`internal/pool/pool.go` 用 fsnotify 监听**所有本地代理文件所在的目录**(而非文件本身,规避部分系统问题),目录去重后逐个 `watcher.Add`,事件按**绝对路径**匹配(避免不同目录下同名文件互相误触发)后在 Write/Create 触发重载。远程列表走独立的 `refreshLoop`,按 `PROXY_URL_INTERVAL` 定时拉取。轮询索引 `current` 用 `sync/atomic` 原子自增,代理列表本身用 `sync.RWMutex` 保护。
+- **多来源合并的三条约定**(改 `loadProxies` 时必须保持):① 合并后按 `formatProxyURL` 去重,**先出现的来源胜出**,归属决定后续回写目标;② 单来源失败只警告并跳过,**全部失败才返回 error 并保留旧列表**;③ 新列表为空但旧列表非空时拒绝更新——否则远程来源一次抖动就会清空整个代理池。
+- **失效代理剔除**:`pool.MarkFailed` 把代理从内存移除、追加到 `failure-proxy.txt`,然后**按 `ProxyInfo.Source` 只重写它所属的那一个本地文件**(`rewriteProxyFile(filename)` 只写回 `Source == filename` 的代理)。绝不能改回"重写单一 proxy.txt":多来源下那会把 A 文件的代理写进 B 文件。远程来源无法回写,改为记入内存 `failed` 集合,在 `dedupe` 中过滤;该集合启动时由 `loadFailedSet` 从 `failure-proxy.txt` 载入,所以重启后仍然生效。
+- **自写自触与日志噪音**:`rewriteProxyFile` 会触发 fsnotify 的 Write 事件,导致一次幂等的冗余重载。因此 watcher 路径走 `reloadFromWatch`(仅在 `loadProxies` 返回 `changed` 时打日志),而导出的 `Reload` 保持每次都打。来源持续故障时的重复告警由 `lastFailures`(`atomic.Value`)抑制,`refreshLoop` 另有一份局部 `lastErr` 抑制整体失败的重复输出。
+- **锁序**:`p.mu` 保护 `proxies`,`p.failedMu` 保护 `failed`。唯一的嵌套是 `MarkFailed` 中的 `mu → failedMu`;`loadProxies` 在 `dedupe` 里取 `failedMu` 时**尚未持有 `mu`**,新增代码不要制造反向嵌套。
 - **认证共用**:`AUTH_USERNAME`/`AUTH_PASSWORD` 对 HTTP(407 Basic)和 SOCKS5(用户名/密码子协商)是同一套凭据,实现在 `internal/auth/auth.go` 与 server 的两套 `checkAuth*` / `handleSOCKS5Auth*` 中。
-- **配置**:`internal/config/config.go` 全部从环境变量读取(经 `godotenv` 从 `.env` 加载),缺失或非法时回落默认值。`.env.example` 是完整字段清单,改配置项要同步更新它和 README。
+- **配置**:`internal/config/config.go` 全部从环境变量读取(经 `godotenv` 从 `.env` 加载),缺失或非法时回落默认值。注意 `PROXY_FILE` 的默认值是**动态**的:配置了 `PROXY_URLS` 时默认为空,以免纯远程部署因缺少 `proxy.txt` 反复告警。`.env.example` 是完整字段清单,改配置项要同步更新它和 README。
 - **优雅关闭**:`main.go` 的 `setupGracefulShutdown` 监听 SIGINT/SIGTERM,顺序关 API server → pool watcher → proxy server。`Server.Start` 的 `Accept` 循环在 listener 关闭后返回错误退出。
 
 ## 包职责速查
@@ -58,9 +61,9 @@ Docker:多阶段构建,`CGO_ENABLED=0 GOOS=linux`(见 Dockerfile);`docker compos
 | `cmd/proxyflow` | 入口:加载配置、装配 pool/server/api、注册信号 |
 | `internal/server` | TCP 层 HTTP/SOCKS5 协议识别与转发(手写解析) |
 | `internal/client` | 普通 HTTP 请求的上游代理客户端池(每代理一个 http.Client) |
-| `internal/pool` | 代理列表加载/解析/轮询/热重载/失效剔除 |
+| `internal/pool` | 代理列表多来源加载(本地文件 + 远程 HTTP 列表)/解析/去重/轮询/热重载/定时刷新/失效剔除 |
 | `internal/api` | 可选的 HTTP API(`/api/get-proxy`、`/api/status`,带有效性检查) |
 | `internal/auth` | HTTP Basic Auth 编解码 |
-| `internal/models` | `ProxyInfo` 数据结构(代理类型、URL、Host、凭据) |
+| `internal/models` | `ProxyInfo` 数据结构(代理类型、URL、Host、凭据、来源标识 `Source`) |
 
 代码注释已是完整 godoc 风格(包注释 + 所有导出符号注释),新增导出符号须保持同样标准。
